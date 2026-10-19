@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ajaia Docs</title>
+<style>
+:root{--bg:#f6f7f9;--surface:#fff;--text:#1c2430;--muted:#667085;--line:#e3e6eb;--accent:#3b5bdb;--accent-ink:#fff;--danger:#c92a2a;--r:8px}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+button,input,select{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:6px 12px;cursor:pointer}
+button:hover{background:#f0f2f5}button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}button.primary:hover{filter:brightness(.95)}
+button.danger{color:var(--danger)}button:disabled{opacity:.5;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input,select{border:1px solid var(--line);border-radius:var(--r);padding:6px 10px;background:var(--surface)}
+header{display:flex;align-items:center;gap:12px;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.logo{font-weight:700;letter-spacing:-.02em;cursor:pointer}.logo b{color:var(--accent)}.grow{flex:1}
+main{max-width:920px;margin:0 auto;padding:24px 16px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:28px 0 8px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px;cursor:pointer}
+.row:hover{border-color:#c5cad3}.row .t{font-weight:600}.row .m{color:var(--muted);font-size:13px}
+.badge{font-size:12px;padding:2px 8px;border-radius:999px;background:#eef1ff;color:var(--accent)}.empty{color:var(--muted);padding:16px;border:1px dashed var(--line);border-radius:var(--r);text-align:center}
+.card{max-width:360px;margin:12vh auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:grid;gap:10px}
+.toolbar{display:flex;gap:4px;flex-wrap:wrap;padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);position:sticky;top:0;z-index:2}
+.toolbar button{min-width:34px;padding:4px 8px}.toolbar button.on{background:#eef1ff;border-color:var(--accent);color:var(--accent)}
+.title{font-size:22px;font-weight:700;border:1px solid transparent;width:100%;background:transparent;padding:4px 8px}.title:hover,.title:focus{border-color:var(--line);background:var(--surface)}
+.canvas{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-top:12px;padding:32px clamp(16px,6vw,64px);min-height:60vh}
+.ProseMirror{outline:none;max-width:68ch;margin:0 auto;min-height:50vh}.ProseMirror p{margin:.6em 0}.ProseMirror h1{font-size:1.8em}.ProseMirror h2{font-size:1.4em;text-transform:none;letter-spacing:0;color:inherit}.ProseMirror h3{font-size:1.15em}
+.bar{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}.status{font-size:13px;color:var(--muted)}.status.err{color:var(--danger)}
+dialog{border:1px solid var(--line);border-radius:12px;padding:20px;width:min(480px,92vw)}dialog::backdrop{background:rgba(0,0,0,.3)}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1c2430;color:#fff;padding:10px 16px;border-radius:var(--r);z-index:10}.toast.err{background:var(--danger)}
+</style></head>
+<body><div id="app"></div><div id="toast" class="toast" hidden role="status"></div>
+<script type="module">
+// Tiptap is bundled locally (public/vendor/tiptap.js, built via `npm run build:vendor`); no CDN needed.
+import { Editor, StarterKit, Underline } from '/vendor/tiptap.js';
+
+const $app = document.getElementById('app');
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (iso) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+let me = null, S = null, toastT;
+
+async function api(path, opt = {}) {
+  const isForm = opt.body instanceof FormData;
+  const r = await fetch('/api' + path, { credentials: 'same-origin', ...opt, headers: opt.body && !isForm ? { 'Content-Type': 'application/json' } : undefined });
+  let d = null; try { d = await r.json(); } catch {}
+  if (!r.ok) throw Object.assign(new Error(d?.error || 'Request failed'), { status: r.status });
+  return d;
+}
+function toast(msg, err) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3500); }
+const shell = (inner) => `<header><span class="logo" id="home">Ajaia<b> Docs</b></span><span class="grow"></span><span class="status">${esc(me.name)} (${esc(me.email)})</span><button id="logout">Sign out</button></header>${inner}`;
+function wireShell() { document.getElementById('home').onclick = () => (location.hash = '#/'); document.getElementById('logout').onclick = async () => { await flush(); await api('/logout', { method: 'POST' }); me = null; teardown(); route(); }; }
+
+function loginView() {
+  $app.innerHTML = `<form class="card" id="f"><h1 style="margin:0">Ajaia<b style="color:var(--accent)"> Docs</b></h1><p class="status" style="margin:0">Demo mode: seeded accounts only (see README). Password: demo1234</p>
+  <label>Email<input name="email" type="email" required value="alice@demo.test" style="width:100%"></label>
+  <label>Password<input name="password" type="password" required style="width:100%"></label><button class="primary">Sign in</button></form>`;
+  document.getElementById('f').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+    try { me = await api('/login', { method: 'POST', body: JSON.stringify({ email: f.get('email'), password: f.get('password') }) }); route(); } catch (x) { toast(x.message, true); } };
+}
+
+async function listView() {
+  $app.innerHTML = shell('<main><div class="bar"><button class="primary" id="new">+ New document</button><button id="imp">Import .txt / .md</button><input type="file" id="file" accept=".txt,.md,text/plain,text/markdown" hidden><input id="q" type="search" placeholder="Search titles…" aria-label="Search documents"><span class="status">Import: .txt/.md, UTF-8, max 2 MB</span></div><div id="lists" class="status">Loading…</div></main>');
+  wireShell();
+  const load = async () => {
+    try {
+      const q = document.getElementById('q').value; const { owned, shared } = await api('/documents?q=' + encodeURIComponent(q));
+      const row = (d, extra) => `<div class="row" tabindex="0" role="link" data-id="${esc(d.id)}"><div class="grow"><div class="t">${esc(d.title)}</div><div class="m">Updated ${fmt(d.updated_at)}${extra || ''}</div></div>${d.role ? `<span class="badge">${d.role}</span>` : '<span class="badge">owner</span>'}${d.role ? '' : `<button class="danger" data-del="${esc(d.id)}">Delete</button>`}</div>`;
+      document.getElementById('lists').innerHTML = `<h2>My documents</h2>${owned.map((d) => row(d)).join('') || '<div class="empty">No documents yet. Create one or import a file.</div>'}<h2>Shared with me</h2>${shared.map((d) => row(d, ' · from ' + esc(d.owner_name))).join('') || '<div class="empty">Nothing has been shared with you yet.</div>'}`;
+      document.querySelectorAll('.row').forEach((r) => { const go = () => (location.hash = '#/doc/' + r.dataset.id); r.onclick = go; r.onkeydown = (e) => e.key === 'Enter' && go(); });
+      document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); if (!confirm('Delete this document permanently? This cannot be undone.')) return;
+        try { await api('/documents/' + b.dataset.del, { method: 'DELETE' }); toast('Document deleted'); load(); } catch (x) { toast(x.message, true); } }));
+    } catch (x) { document.getElementById('lists').innerHTML = `<div class="empty">${esc(x.message)}</div>`; }
+  };
+  document.getElementById('q').oninput = load;
+  document.getElementById('new').onclick = async () => { try { const d = await api('/documents', { method: 'POST', body: '{}' }); location.hash = '#/doc/' + d.id; } catch (x) { toast(x.message, true); } };
+  const file = document.getElementById('file');
+  document.getElementById('imp').onclick = () => file.click();
+  file.onchange = async () => { if (!file.files[0]) return; const fd = new FormData(); fd.append('file', file.files[0]);
+    try { const d = await api('/documents/import', { method: 'POST', body: fd }); toast('Imported "' + d.title + '"'); location.hash = '#/doc/' + d.id; } catch (x) { toast(x.message, true); } file.value = ''; };
+  load();
+}
+
+// ---- editor with debounced, race-safe autosave ----
+function teardown() { if (S) { clearTimeout(S.timer); S.editor?.destroy(); S = null; } }
+async function flush() { if (S && S.seq !== S.saved && S.doc.role !== 'viewer') await save(S); }
+async function save(s) {
+  clearTimeout(s.timer); const mySeq = s.seq; setStatus(s, 'Saving…');
+  try {
+    await api('/documents/' + s.doc.id, { method: 'PATCH', body: JSON.stringify({ content: s.editor.getJSON() }) });
+    s.saved = Math.max(s.saved, mySeq);
+    if (S === s) setStatus(s, s.seq === s.saved ? 'Saved ' + new Date().toLocaleTimeString() : 'Saving…'); // stale response never marks newer edits saved
+    if (s.seq !== s.saved && S === s) save(s);
+  } catch (x) { if (S === s) setStatus(s, 'Save failed: ' + x.message + ' (will retry on next edit)', true); }
+}
+function setStatus(s, t, err) { const el = document.getElementById('status'); if (el && S === s) { el.textContent = t; el.className = 'status' + (err ? ' err' : ''); } }
+
+async function docView(id) {
+  await flush(); teardown();
+  $app.innerHTML = shell('<main>Loading…</main>'); wireShell();
+  let doc; try { doc = await api('/documents/' + id); } catch (x) { $app.innerHTML = shell(`<main><div class="empty">${esc(x.status === 404 ? 'Document not found or you no longer have access.' : x.message)}<br><br><button id="back">Back to documents</button></div></main>`); wireShell(); document.getElementById('back').onclick = () => (location.hash = '#/'); return; }
+  const ro = doc.role === 'viewer';
+  $app.innerHTML = shell(`<main><div class="bar"><button id="back">← Documents</button><input class="title" id="title" maxlength="120" aria-label="Document title" value="${esc(doc.title)}" ${ro ? 'disabled' : ''}><span class="badge">${doc.role}</span>${doc.role === 'owner' ? '<button id="share">Share</button>' : ''}</div>
+  ${ro ? '<div class="empty" style="margin-bottom:8px">You have view-only access to this document.</div>' : `<div class="toolbar" role="toolbar" aria-label="Formatting">
+  <button data-c="bold" title="Bold"><b>B</b></button><button data-c="italic" title="Italic"><i>I</i></button><button data-c="underline" title="Underline"><u>U</u></button>
+  <button data-c="h1" title="Heading 1">H1</button><button data-c="h2" title="Heading 2">H2</button><button data-c="h3" title="Heading 3">H3</button>
+  <button data-c="bullet" title="Bulleted list">• List</button><button data-c="ordered" title="Numbered list">1. List</button></div>`}
+  <div class="canvas"><div id="ed"></div></div><div class="bar"><span id="status" class="status">${ro ? 'Read-only' : 'All changes saved'}</span></div></main>`);
+  wireShell();
+  const s = S = { doc, seq: 0, saved: 0, timer: null, editor: null };
+  s.editor = new Editor({ element: document.getElementById('ed'), extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } }), Underline], content: doc.content, editable: !ro,
+    onUpdate: () => { s.seq++; setStatus(s, 'Unsaved changes…'); clearTimeout(s.timer); s.timer = setTimeout(() => save(s), 800); },
+    onTransaction: () => document.querySelectorAll('[data-c]').forEach((b) => { const c = b.dataset.c; b.classList.toggle('on', c === 'bullet' ? s.editor.isActive('bulletList') : c === 'ordered' ? s.editor.isActive('orderedList') : /^h\d$/.test(c) ? s.editor.isActive('heading', { level: +c[1] }) : s.editor.isActive(c)); }) });
+  document.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => { const c = b.dataset.c, ch = s.editor.chain().focus();
+    ({ bold: () => ch.toggleBold(), italic: () => ch.toggleItalic(), underline: () => ch.toggleUnderline(), h1: () => ch.toggleHeading({ level: 1 }), h2: () => ch.toggleHeading({ level: 2 }), h3: () => ch.toggleHeading({ level: 3 }), bullet: () => ch.toggleBulletList(), ordered: () => ch.toggleOrderedList() })[c]().run(); }));
+  document.getElementById('back').onclick = () => (location.hash = '#/');
+  const t = document.getElementById('title');
+  t.onchange = async () => { try { await api('/documents/' + doc.id, { method: 'PATCH', body: JSON.stringify({ title: t.value }) }); doc.title = t.value.trim(); t.value = doc.title; toast('Renamed'); } catch (x) { t.value = doc.title; toast(x.message, true); } };
+  t.onkeydown = (e) => e.key === 'Enter' && t.blur();
+  if (doc.role === 'owner') document.getElementById('share').onclick = () => shareDialog(doc);
+}
+
+async function shareDialog(doc) {
+  const dlg = document.createElement('dialog'); document.body.append(dlg);
+  const render = (list) => { dlg.innerHTML = `<h3 style="margin-top:0">Share “${esc(doc.title)}”</h3><form id="sf" class="bar"><input name="email" type="email" required placeholder="Email of existing user" style="flex:1" aria-label="Email"><select name="role" aria-label="Role"><option value="viewer">Viewer</option><option value="editor">Editor</option></select><button class="primary">Share</button></form>
+    ${list.length ? list.map((c) => `<div class="bar"><div class="grow"><b>${esc(c.name)}</b><div class="status">${esc(c.email)}</div></div><select data-role="${esc(c.userId)}" aria-label="Role for ${esc(c.name)}"><option value="viewer" ${c.role === 'viewer' ? 'selected' : ''}>Viewer</option><option value="editor" ${c.role === 'editor' ? 'selected' : ''}>Editor</option></select><button class="danger" data-rm="${esc(c.userId)}">Remove</button></div>`).join('') : '<div class="empty">Only you have access.</div>'}
+    <div class="bar"><span class="grow"></span><button id="close">Close</button></div>`;
+    dlg.querySelector('#close').onclick = () => { dlg.close(); dlg.remove(); };
+    dlg.querySelector('#sf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); try { render(await api(`/documents/${doc.id}/shares`, { method: 'POST', body: JSON.stringify({ email: f.get('email'), role: f.get('role') }) })); } catch (x) { toast(x.message, true); } };
+    dlg.querySelectorAll('[data-role]').forEach((s) => (s.onchange = async () => { try { render(await api(`/documents/${doc.id}/shares/${s.dataset.role}`, { method: 'PATCH', body: JSON.stringify({ role: s.value }) })); } catch (x) { toast(x.message, true); } }));
+    dlg.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { try { render(await api(`/documents/${doc.id}/shares/${b.dataset.rm}`, { method: 'DELETE' })); } catch (x) { toast(x.message, true); } }));
+  };
+  try { render(await api(`/documents/${doc.id}/shares`)); dlg.showModal(); } catch (x) { toast(x.message, true); dlg.remove(); }
+}
+
+async function route() {
+  if (!me) { try { me = await api('/me'); } catch { return loginView(); } }
+  const m = location.hash.match(/^#\/doc\/([\w-]+)$/);
+  if (m) docView(m[1]); else { await flush(); teardown(); listView(); }
+}
+addEventListener('hashchange', route);
+addEventListener('beforeunload', (e) => { if (S && S.seq !== S.saved && S.doc.role !== 'viewer') { fetch('/api/documents/' + S.doc.id, { method: 'PATCH', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: S.editor.getJSON() }) }); e.preventDefault(); } });
+route();
+</script></body></html>

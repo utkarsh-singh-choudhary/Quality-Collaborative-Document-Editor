@@ -1,0 +1,21 @@
+# Render Blueprint. SQLite needs a persistent disk, which requires a paid instance (starter).
+services:
+  - type: web
+    name: ajaia-docs
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DB_PATH
+        value: /var/data/data.db
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
